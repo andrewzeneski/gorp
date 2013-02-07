@@ -37,6 +37,12 @@ type Dialect interface {
 	// Handles quoting of a field name to ensure that it doesn't raise any
 	// SQL parsing exceptions by using a reserved word as a field name.
 	QuoteField(field string) string
+
+	// Handles formatting schema and table name combinations
+	FormatTableName(schema, tableName string) string
+
+	// string to use for the create schema statement
+	CreateSchemaSyntax(name string) string
 }
 
 ///////////////////////////////////////////////////////
@@ -97,6 +103,17 @@ func (d SqliteDialect) LastInsertId(res *sql.Result, table *TableMap, exec SqlEx
 
 func (d SqliteDialect) QuoteField(f string) string {
 	return "'" + f + "'"
+}
+
+func (d SqliteDialect) FormatTableName(schema, tableName string) string {
+	if len(schema) == 0 {
+		return tableName
+	}
+	return schema + "." + tableName
+}
+
+func (d SqliteDialect) CreateSchemaSyntax(name string) string {
+	return "select 1;"
 }
 
 ///////////////////////////////////////////////////////
@@ -160,7 +177,7 @@ func (d PostgresDialect) BindVar(i int) string {
 }
 
 func (d PostgresDialect) LastInsertId(res *sql.Result, table *TableMap, exec SqlExecutor) (int64, error) {
-	sql := fmt.Sprintf("select currval('%s_%s_seq')", table.TableName, table.keys[0].ColumnName)
+	sql := fmt.Sprintf("select currval('%s_%s_seq')", table.GetFullTableName(), table.keys[0].ColumnName)
 	rows, err := exec.query(sql)
 	if err != nil {
 		return 0, err
@@ -177,6 +194,29 @@ func (d PostgresDialect) LastInsertId(res *sql.Result, table *TableMap, exec Sql
 
 func (d PostgresDialect) QuoteField(f string) string {
 	return `"` + f + `"`
+}
+
+func (d PostgresDialect) FormatTableName(schema, tableName string) string {
+	if len(schema) == 0 {
+		return tableName
+	}
+	return schema + "." + tableName
+}
+
+func (d PostgresDialect) CreateSchemaSyntax(name string) string {
+	stmt := `DO $$
+		BEGIN
+		    IF NOT EXISTS(
+		        SELECT schema_name
+		          FROM information_schema.schemata
+		          WHERE schema_name = '%s'
+		      )
+		    THEN
+		      EXECUTE 'CREATE SCHEMA %s';
+		    END IF;
+		END
+		$$;`
+	return fmt.Sprintf(stmt, name, name)
 }
 
 ///////////////////////////////////////////////////////
@@ -245,4 +285,15 @@ func (m MySQLDialect) LastInsertId(res *sql.Result, table *TableMap, exec SqlExe
 
 func (d MySQLDialect) QuoteField(f string) string {
 	return "`" + f + "`"
+}
+
+func (d MySQLDialect) FormatTableName(schema, tableName string) string {
+	if len(schema) == 0 {
+		return tableName
+	}
+	return schema + "." + tableName
+}
+
+func (d MySQLDialect) CreateSchemaSyntax(name string) string {
+	return fmt.Sprintf("create schema if not exists %s;", name)
 }
