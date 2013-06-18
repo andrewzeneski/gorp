@@ -41,6 +41,9 @@ type Dialect interface {
 	// Handles quoting of a field name to ensure that it doesn't raise any
 	// SQL parsing exceptions by using a reserved word as a field name.
 	QuoteField(field string) string
+
+	// string to use for the create schema statement
+	CreateSchemaSyntax(name string) string
 }
 
 func standardInsertAutoIncr(exec SqlExecutor, insertSql string, params ...interface{}) (int64, error) {
@@ -121,6 +124,10 @@ func (d SqliteDialect) QuoteField(f string) string {
 	return `"` + f + `"`
 }
 
+func (d SqliteDialect) CreateSchemaSyntax(name string) string {
+	return "select 1;"
+}
+
 ///////////////////////////////////////////////////////
 // PostgreSQL //
 ////////////////
@@ -192,7 +199,7 @@ func (d PostgresDialect) BindVar(i int) string {
 }
 
 func (d PostgresDialect) InsertAutoIncr(exec SqlExecutor, insertSql string, params ...interface{}) (int64, error) {
-	rows, err := exec.query(insertSql, params...)
+	rows, err := exec.Query(insertSql, params...)
 	if err != nil {
 		return 0, err
 	}
@@ -209,6 +216,23 @@ func (d PostgresDialect) InsertAutoIncr(exec SqlExecutor, insertSql string, para
 
 func (d PostgresDialect) QuoteField(f string) string {
 	return `"` + strings.ToLower(f) + `"`
+}
+
+func (d PostgresDialect) CreateSchemaSyntax(name string) string {
+	stmt := `DO $$
+    BEGIN
+        IF NOT EXISTS(
+            SELECT schema_name
+              FROM information_schema.schemata
+              WHERE schema_name = '%s'
+          )
+        THEN
+          EXECUTE 'CREATE SCHEMA %s';
+        END IF;
+    END
+    $$;`
+	quotedName := d.QuoteField(name)
+	return fmt.Sprintf(stmt, name, quotedName)
 }
 
 ///////////////////////////////////////////////////////
@@ -287,4 +311,8 @@ func (m MySQLDialect) InsertAutoIncr(exec SqlExecutor, insertSql string, params 
 
 func (d MySQLDialect) QuoteField(f string) string {
 	return "`" + f + "`"
+}
+
+func (d MySQLDialect) CreateSchemaSyntax(name string) string {
+	return fmt.Sprintf("create schema if not exists %s;", d.QuoteField(name))
 }

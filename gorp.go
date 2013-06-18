@@ -109,6 +109,9 @@ type DbMap struct {
 	// Dialect implementation to use with this map
 	Dialect Dialect
 
+	// Schema name (will prefix table name e.g. schema.tablename)
+	Schema string
+
 	TypeConverter TypeConverter
 
 	tables    []*TableMap
@@ -180,6 +183,13 @@ func (t *TableMap) ColMap(field string) *ColumnMap {
 		panic(e)
 	}
 	return col
+}
+
+func (t *TableMap) QualifiedTableName() string {
+	if len(t.dbmap.Schema) > 0 {
+		return fmt.Sprintf("%s.%s", t.dbmap.Schema, t.TableName) // don't quote
+	}
+	return t.dbmap.Dialect.QuoteField(t.TableName)
 }
 
 func colMapOrNil(t *TableMap, field string) *ColumnMap {
@@ -270,7 +280,7 @@ func (t *TableMap) bindInsert(elem reflect.Value) (bindInstance, error) {
 
 		s := bytes.Buffer{}
 		s2 := bytes.Buffer{}
-		s.WriteString(fmt.Sprintf("insert into %s (", t.dbmap.Dialect.QuoteField(t.TableName)))
+		s.WriteString(fmt.Sprintf("insert into %s (", t.QualifiedTableName()))
 
 		x := 0
 		first := true
@@ -322,7 +332,7 @@ func (t *TableMap) bindUpdate(elem reflect.Value) (bindInstance, error) {
 	if plan.query == "" {
 
 		s := bytes.Buffer{}
-		s.WriteString(fmt.Sprintf("update %s set ", t.dbmap.Dialect.QuoteField(t.TableName)))
+		s.WriteString(fmt.Sprintf("update %s set ", t.QualifiedTableName()))
 		x := 0
 
 		for y := range t.columns {
@@ -380,7 +390,7 @@ func (t *TableMap) bindDelete(elem reflect.Value) (bindInstance, error) {
 	if plan.query == "" {
 
 		s := bytes.Buffer{}
-		s.WriteString(fmt.Sprintf("delete from %s", t.dbmap.Dialect.QuoteField(t.TableName)))
+		s.WriteString(fmt.Sprintf("delete from %s", t.QualifiedTableName()))
 
 		for y := range t.columns {
 			col := t.columns[y]
@@ -440,7 +450,7 @@ func (t *TableMap) bindGet() bindPlan {
 			}
 		}
 		s.WriteString(" from ")
-		s.WriteString(t.TableName)
+		s.WriteString(t.QualifiedTableName())
 		s.WriteString(" where ")
 		for x := range t.keys {
 			col := t.keys[x]
@@ -542,8 +552,8 @@ type SqlExecutor interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 	Select(i interface{}, query string,
 		args ...interface{}) ([]interface{}, error)
-	query(query string, args ...interface{}) (*sql.Rows, error)
-	queryRow(query string, args ...interface{}) *sql.Row
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
 }
 
 // TraceOn turns on SQL statement logging for this DbMap.  After this is
@@ -642,6 +652,18 @@ func (m *DbMap) CreateTablesIfNotExists() error {
 
 func (m *DbMap) createTables(ifNotExists bool) error {
 	var err error
+
+	// first create the schema (create schema is always ifNotExist)
+	if len(m.Schema) > 0 {
+		stmt := m.Dialect.CreateSchemaSyntax(m.Schema)
+		if len(stmt) > 0 {
+			_, err = m.Exec(stmt)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	for i := range m.tables {
 		table := m.tables[i]
 
@@ -650,7 +672,7 @@ func (m *DbMap) createTables(ifNotExists bool) error {
 			create += " if not exists"
 		}
 		s := bytes.Buffer{}
-		s.WriteString(fmt.Sprintf("%s %s (", create, m.Dialect.QuoteField(table.TableName)))
+		s.WriteString(fmt.Sprintf("%s %s (", create, table.QualifiedTableName()))
 		x := 0
 		for _, col := range table.columns {
 			if !col.Transient {
@@ -726,7 +748,7 @@ func (m *DbMap) dropTables(addIfExists bool, addCascade bool) error {
 	var err error
 	for i := range m.tables {
 		table := m.tables[i]
-		_, e := m.Exec(fmt.Sprintf("drop table%s%s %s;", ifExists, cascade, m.Dialect.QuoteField(table.TableName)))
+		_, e := m.Exec(fmt.Sprintf("drop table%s %s%s;", ifExists, table.QualifiedTableName(), cascade))
 		if e != nil {
 			err = e
 		}
@@ -901,12 +923,12 @@ func (m *DbMap) tableForPointer(ptr interface{}, checkPK bool) (*TableMap, refle
 	return t, elem, nil
 }
 
-func (m *DbMap) queryRow(query string, args ...interface{}) *sql.Row {
+func (m *DbMap) QueryRow(query string, args ...interface{}) *sql.Row {
 	m.trace(query, args)
 	return m.Db.QueryRow(query, args...)
 }
 
-func (m *DbMap) query(query string, args ...interface{}) (*sql.Rows, error) {
+func (m *DbMap) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	m.trace(query, args)
 	return m.Db.Query(query, args...)
 }
@@ -985,12 +1007,12 @@ func (t *Transaction) Rollback() error {
 	return t.tx.Rollback()
 }
 
-func (t *Transaction) queryRow(query string, args ...interface{}) *sql.Row {
+func (t *Transaction) QueryRow(query string, args ...interface{}) *sql.Row {
 	t.dbmap.trace(query, args)
 	return t.tx.QueryRow(query, args...)
 }
 
-func (t *Transaction) query(query string, args ...interface{}) (*sql.Rows, error) {
+func (t *Transaction) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	t.dbmap.trace(query, args)
 	return t.tx.Query(query, args...)
 }
@@ -1046,7 +1068,7 @@ func SelectNullStr(e SqlExecutor, query string, args ...interface{}) (sql.NullSt
 }
 
 func selectVal(e SqlExecutor, holder interface{}, query string, args ...interface{}) error {
-	rows, err := e.query(query, args...)
+	rows, err := e.Query(query, args...)
 	if err != nil {
 		return err
 	}
@@ -1110,7 +1132,7 @@ func rawselect(m *DbMap, exec SqlExecutor, i interface{}, query string,
 	}
 
 	// Run the query
-	rows, err := exec.query(query, args...)
+	rows, err := exec.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1326,7 +1348,7 @@ func get(m *DbMap, exec SqlExecutor, i interface{},
 		dest[x] = target
 	}
 
-	row := exec.queryRow(plan.query, keys...)
+	row := exec.QueryRow(plan.query, keys...)
 	err = row.Scan(dest...)
 	if err != nil {
 		if err == sql.ErrNoRows {
