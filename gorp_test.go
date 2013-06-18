@@ -377,13 +377,13 @@ func TestNullValues(t *testing.T) {
 	}
 
 	// update it
-	t1.Str = sql.NullString{"hi", true}
+	t1.Str = sql.NullString{String: "hi", Valid: true}
 	expected.Str = t1.Str
-	t1.Int64 = sql.NullInt64{999, true}
+	t1.Int64 = sql.NullInt64{Int64: 999, Valid: true}
 	expected.Int64 = t1.Int64
-	t1.Float64 = sql.NullFloat64{53.33, true}
+	t1.Float64 = sql.NullFloat64{Float64: 53.33, Valid: true}
 	expected.Float64 = t1.Float64
-	t1.Bool = sql.NullBool{true, true}
+	t1.Bool = sql.NullBool{Bool: true, Valid: true}
 	expected.Bool = t1.Bool
 	t1.Bytes = []byte{1, 30, 31, 33}
 	expected.Bytes = t1.Bytes
@@ -664,10 +664,10 @@ func TestSelectVal(t *testing.T) {
 
 	bindVar := dbmap.Dialect.BindVar(0)
 
-	t1 := TableWithNull{Str: sql.NullString{"abc", true},
-		Int64:   sql.NullInt64{78, true},
-		Float64: sql.NullFloat64{32.2, true},
-		Bool:    sql.NullBool{true, true},
+	t1 := TableWithNull{Str: sql.NullString{String: "abc", Valid: true},
+		Int64:   sql.NullInt64{Int64: 78, Valid: true},
+		Float64: sql.NullFloat64{Float64: 32.2, Valid: true},
+		Bool:    sql.NullBool{Bool: true, Valid: true},
 		Bytes:   []byte("hi")}
 	_insert(dbmap, &t1)
 
@@ -687,12 +687,12 @@ func TestSelectVal(t *testing.T) {
 
 	// SelectNullInt
 	n := selectNullInt(dbmap, "select Int64 from TableWithNull where Str='notfound'")
-	if !reflect.DeepEqual(n, sql.NullInt64{0, false}) {
+	if !reflect.DeepEqual(n, sql.NullInt64{Int64: 0, Valid: false}) {
 		t.Errorf("nullint %v != 0,false", n)
 	}
 
 	n = selectNullInt(dbmap, "select Int64 from TableWithNull where Str='abc'")
-	if !reflect.DeepEqual(n, sql.NullInt64{78, true}) {
+	if !reflect.DeepEqual(n, sql.NullInt64{Int64: 78, Valid: true}) {
 		t.Errorf("nullint %v != 78, true", n)
 	}
 
@@ -708,11 +708,11 @@ func TestSelectVal(t *testing.T) {
 
 	// SelectNullStr
 	ns := selectNullStr(dbmap, "select Str from TableWithNull where Int64="+bindVar, 78)
-	if !reflect.DeepEqual(ns, sql.NullString{"abc", true}) {
+	if !reflect.DeepEqual(ns, sql.NullString{String: "abc", Valid: true}) {
 		t.Errorf("nullstr %v != abc,true", ns)
 	}
 	ns = selectNullStr(dbmap, "select Str from TableWithNull where Str='asdfasdf'")
-	if !reflect.DeepEqual(ns, sql.NullString{"", false}) {
+	if !reflect.DeepEqual(ns, sql.NullString{String: "", Valid: false}) {
 		t.Errorf("nullstr no rows %v != '',false", ns)
 	}
 }
